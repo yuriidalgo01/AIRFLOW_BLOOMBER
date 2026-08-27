@@ -1,2 +1,5 @@
 logs/
 airflow.cfg
+data/
+Scripts_test/
+/*.json

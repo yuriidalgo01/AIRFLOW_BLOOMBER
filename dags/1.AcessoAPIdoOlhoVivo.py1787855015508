@@ -1,0 +1,31 @@
+import json
+from datetime import datetime
+from airflow import DAG
+from airflow.providers.http.operators.http import SimpleHttpOperator
+import pendulum
+
+with DAG(
+    dag_id = "SensorAPIOlhoVivo",
+    description = "Sensor da API Olho Vivo Sptrans.",
+    schedule = None,  # A DAG não será executada automaticamente; será disparada manualmente.
+    start_date = pendulum.datetime(2025, 1, 1, tz = "America/Sao_Paulo"),  # Data de início da DAG.
+    catchup = False,  # Não executar execuções passadas que foram perdidas.
+    tags = ["API", "OLHO_VIVO"],  # Tags para categorizar a DAG.,
+    catchup=False,
+) as dag:
+
+    # 1. Chamada POST para autenticar e obter o token
+    auth_post = SimpleHttpOperator(
+        task_id="post_authentication",
+        http_conn_id="olho_vivo_api",  # Definido na UI do Airflow (Admin > Connections)
+        endpoint="/Posicao",           # Complemento da URL configurada na Connection
+        method="GET",
+        data=json.dumps({
+            "username": "seu_usuario",
+            "password": "sua_password",
+            "grant_type": "password"
+        }),
+        headers={"Content-Type": "application/json"},
+        log_response=True,  # Opcional: imprime resposta nos logs para depuração
+        do_xcom_push=True   # Envia a resposta HTTP para o XCom
+    )
