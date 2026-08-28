@@ -117,7 +117,7 @@ with DAG(
     dag_id="processamento_diario_posicao_onibus_teste",
     default_args=default_args,
     start_date=datetime(2026, 1, 1),
-    schedule=" 0 3 * * * ",              # 'None' para permitir apenas disparos manuais no teste
+    schedule="0 3 1 * *",              # 'None' para permitir apenas disparos manuais no teste
     catchup=False,
     tags=["processamento_distancia", "distancia_km", "distancia_m"],
     max_active_runs=1,

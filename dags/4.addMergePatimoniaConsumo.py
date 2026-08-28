@@ -10,7 +10,7 @@ from airflow.decorators import dag, task
 @dag(
     dag_id="etl_tabela_patrimonial_conama",
     description="Pipeline para gerar tabela CONAMA e normalizar base patrimonial com emissões",
-    schedule="0 0 1 * *",  # Ajuste para uma cron expression (ex: "0 6 * * *") se quiser agendar
+    schedule="0 10 1 * *",  # Ajuste para uma cron expression (ex: "0 6 * * *") se quiser agendar
     start_date=pendulum.datetime(2026, 1, 1, tz="America/Sao_Paulo"),
     catchup=False,
     max_active_runs=1,
