@@ -28,10 +28,10 @@ def calcular_emissoes(df: pd.DataFrame) -> pd.DataFrame:
     ).round(3)
     
     # Emissão de NOx e Material Particulado (MP)
-    df["emissao_nox"] = (
+    df["emissao_nox(kg)"] = (
         df["distancia_km"] * df["NOx(kg poluentes/kg diesel)"] * df["com_ar_kg_km"]
     )
-    df["emissao_mp"] = (
+    df["emissao_mp(kg)"] = (
         df["distancia_km"] * df["MP(kg poluentes/kg diesel)"] * df["com_ar_kg_km"]
     )
     
