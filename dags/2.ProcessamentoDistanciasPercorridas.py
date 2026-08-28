@@ -23,18 +23,24 @@ def processar_distancia_dia_anterior(data_alvo: str, **kwargs):
     """
     data_alvo: data no formato 'YYYYMMDD' (ex: '20260827')
     """
-    # Use os caminhos internos do Linux:
-    base_dir = "/opt/airflow/data/row/POSICAO"
-    output_dir = "/opt/airflow/data/processed"
+    data_formatada = datetime.strptime(data_alvo, "%Y%m%d").strftime("%Y-%m-%d")
+    # Teste
+    print(data_formatada)
+    base_dir = Path(f"/opt/airflow/data/raw/POSICAO/data={data_formatada}")
+    output_dir = Path(f"/opt/airflow/data/processed/data={data_formatada}")
     
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    # Define e cria os diretórios específicos de saída
+    dir_parquet = output_dir / "files_parquet"
+    dir_csv = output_dir / "files_csv"
     
-    # Filtra arquivos pela data
-    pattern = f"{base_dir}/posicao_{data_alvo}_*.json"
+    dir_parquet.mkdir(parents=True, exist_ok=True)
+    dir_csv.mkdir(parents=True, exist_ok=True)
+    
+    pattern = str(base_dir / f"posicao_{data_alvo}_*.json")
     arquivos = glob.glob(pattern)
 
     if not arquivos:
-        print(f"Nenhum arquivo encontrado para a data {data_alvo} no caminho {pattern}.")
+        print(f"Nenhum arquivo encontrado para a data {data_alvo} no caminho: {pattern}")
         return
 
     print(f"Processando {len(arquivos)} arquivos da data {data_alvo}...")
@@ -88,10 +94,16 @@ def processar_distancia_dia_anterior(data_alvo: str, **kwargs):
         "data",
     ]
 
-    # Salva o Parquet na pasta processed
-    caminho_saida = f"{output_dir}/distancia_veiculos_{data_alvo}.parquet"
-    df_resumo.to_parquet(caminho_saida, index=False)
-    print(f"Processamento concluído com sucesso! Salvo em: {caminho_saida}")
+    # Salva o Parquet e CSV garantindo a criação das pastas
+    caminho_saida_1 = dir_parquet / f"distancia_veiculos_{data_alvo}.parquet"
+    caminho_saida_2 = dir_csv / f"distancia_veiculos_{data_alvo}.csv"
+
+    df_resumo.to_parquet(caminho_saida_1, index=False)
+    df_resumo.to_csv(caminho_saida_2, index=False)
+    
+    print(f"Sucesso! Arquivos gerados:")
+    print(f" -> Parquet: {caminho_saida_1.resolve()}")
+    print(f" -> CSV:     {caminho_saida_2.resolve()}")
 
 
 # --- Definição da DAG ---
@@ -105,7 +117,7 @@ with DAG(
     dag_id="processamento_diario_posicao_onibus_teste",
     default_args=default_args,
     start_date=datetime(2026, 1, 1),
-    schedule=None,              # 'None' para permitir apenas disparos manuais no teste
+    schedule=" 0 3 * * * ",              # 'None' para permitir apenas disparos manuais no teste
     catchup=False,
     tags=["processamento_distancia", "distancia_km", "distancia_m"],
     max_active_runs=1,
@@ -114,7 +126,7 @@ with DAG(
     task_processar = PythonOperator(
         task_id="calcular_distancia_dia_anterior",
         python_callable=processar_distancia_dia_anterior,
-        # Para testar os dados de hoje diretamente:
+        # Você pode passar qualquer dia desejado:
         op_kwargs={"data_alvo": "20260827"},
     )
 
