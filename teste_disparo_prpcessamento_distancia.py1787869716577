@@ -1,0 +1,3 @@
+from 2.ProcessamantoDistanciasPercorridas import processar_distancia_dia_anterior
+
+processar_distancia_dia_anterior("20260827")

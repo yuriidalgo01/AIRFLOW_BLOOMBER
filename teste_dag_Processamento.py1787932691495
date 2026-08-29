@@ -7,8 +7,7 @@ from airflow.decorators import dag, task
 from airflow.models import Variable
 
 
-#Função Para Auxiliar as Extrações dos dados de Interesse:
-
+# Função Para Auxiliar as Extrações dos dados de Interesse:
 def transformar_dados_sptrans(json_data):
     hora_referencia = json_data.get("hr")
     registros = []
@@ -25,11 +24,6 @@ def transformar_dados_sptrans(json_data):
             registros.append({
                 "prefixo_veiculo": veiculo.get("p"),     # 'p'
                 "hr_referencia": hora_referencia,
-                #"codigo_linha": codigo_linha,
-                #"letreiro_origem": letreiro_origem,
-                #"letreiro_destino": letreiro_destino,
-                #"sentido": sentido,
-                #"acessivel": veiculo.get("a"),          # 'a'
                 "latitude": veiculo.get("py"),          # 'py'
                 "longitude": veiculo.get("px"),         # 'px'
                 "timestamp_gps": veiculo.get("ta"),     # 'ta'
@@ -38,7 +32,6 @@ def transformar_dados_sptrans(json_data):
     # Cria o DataFrame
     df = pd.DataFrame(registros)
     
-    # Opcional: Tipagem adequada
     if not df.empty:
         df["timestamp_gps"] = pd.to_datetime(df["timestamp_gps"])
         df["latitude"] = df["latitude"].astype(float)
@@ -47,13 +40,14 @@ def transformar_dados_sptrans(json_data):
 
     return df
 
+
 @dag(
     dag_id="SensorAPIOlhoVivo",
     description="Sensor da API Olho Vivo SPTrans",
-    schedule="* * * * *",  # Altere para "*/5 * * * *" quando quiser rodar a cada 5 min
+    schedule="* * * * *",
     start_date=pendulum.datetime(2025, 1, 1, tz="America/Sao_Paulo"),
     catchup=False,
-    max_active_runs = 1,
+    max_active_runs=1,
     tags=["API", "OLHO_VIVO"],
 )
 def pipeline_olho_vivo():
@@ -84,21 +78,24 @@ def pipeline_olho_vivo():
         output_dir.mkdir(parents=True, exist_ok=True)
         arquivo_destino = output_dir / f"posicao_{ts}.json"
 
-        df = transformar_dados_sptrans(dados)
-
-        # Cria pasta de saída se não existir para o formato parquet
+        # Cria pasta diária para Parquet
         output_dir_parquet = Path("/opt/airflow/data/raw/POSICAO_parquet") / f"data={data_particao}"
         output_dir_parquet.mkdir(parents=True, exist_ok=True)
         arquivo_destino_parquet = output_dir_parquet / f"posicao_{ts}.parquet"
 
+        # Salva o Parquet
+        df = transformar_dados_sptrans(dados)
         df.to_parquet(path=arquivo_destino_parquet)
 
+        # Salva o JSON bruto
         with open(arquivo_destino, "w", encoding="utf-8") as f:
             json.dump(dados, f, ensure_ascii=False, indent=2)
 
-        print(f"Sucesso! Arquivo gravado em: {arquivo_destino}")
+        print(f"Sucesso! Arquivo JSON: {arquivo_destino}")
+        print(f"Sucesso! Arquivo Parquet: {arquivo_destino_parquet}")
         return str(arquivo_destino)
 
     extrair_posicoes_sptrans()
+
 
 pipeline_olho_vivo()

@@ -1,0 +1,168 @@
+from datetime import datetime, timedelta
+from pathlib import Path
+import glob
+import numpy as np
+import pandas as pd
+import pendulum 
+
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+
+def df_fase_conama_motor_raw()->pd.DataFrame:
+    '''
+    P3 a partir de 1994
+    P4 a partir de 1998
+    P5 a partir de 2005
+    P6 a partir de 2009
+    P7 a partir de 2012
+    P8 a partir de 2023
+    
+    Fontes de informação:
+    - Ministério do Meio Ambiente e Mudança do Clima. Programa de controle de emissões veiculares (Proconve). Disponível em: https://www.gov.br/ibama/pt-br/assuntos/emissoes-e-residuos/emissoes/programa-de-controle-de-emissoes-veiculares-proconve. Publicado em: 29 nov. 2022. Acesso em: 18 mar. 2026.
+    - Ministério do Meio Ambiente; Instituto Brasileiro do Meio Ambiente e dos Recursos Naturais Renováveis. Programa de Controle da Poluição do Ar por Veículos Automotores: III.4. Veículo Pesado (Ônibus e Caminhão). In: __. Manula PROCONVE/PROMOT. Brasília, 2011. Disponível em: https://www.gov.br/ibama/pt-br/assuntos/emissoes-e-residuos/emissoes/arquivos/manual%20proconve%20promot_portugues.pdf . Acesso em: 18 mar. 2026.
+    - Petrobras. Introdução da fase P7 para veículos pesados no Brasil - Desafios no mercado de diesel. Disponível em: https://conama.mma.gov.br/index.php?option=com_sisconama&task=documento.download&id=18951. Acesso em: 18 mar. 2026.
+    - Resolução CONAMA nº 315, de 29 de outubro de 2002. Dispõe sobre a nova etapa do Programa de Controle de Emissões Veiculares-PROCONVE. Brasil: https://www.siam.mg.gov.br/sla/download.pdf?idNorma=265. 2002.
+    - RESOLUÇÃO Nº 490, DE 16 DE NOVEMBRO DE 2018. Estabelece a Fase PROCONVE P8 de exigências do Programa de Controle da Poluição do Ar por Veículos Automotores – PROCONVE para o controle das emissões de gases poluentes e de ruído para veículos automotores pesados novos de uso rodoviário e dá outras providências. Brasil:  https://conama.mma.gov.br/?option=com_sisconama&task=arquivo.download&id=767. 2018.
+    '''
+
+    ano_atual = pendulum.now("America/Sao_Paulo").format("YYYY")
+    
+    tabela_conama_ano=pd.DataFrame(
+        {
+            "fase_conama" :[
+                'P3',
+                'P4',
+                'P5',
+                'P6',
+                'P7',
+                'P8',
+            ],
+            "ano_inicio": [
+                1994,
+                1998,
+                2005,
+                2009,
+                2012,
+                2023,
+            ],
+        }
+    )
+
+    #
+    tabela_conama_ano['ano_fim'] = tabela_conama_ano['ano_inicio'].shift(-1) - 1
+    tabela_conama_ano['ano_fim'] = tabela_conama_ano['ano_fim'].fillna(ano_atual).astype(int)
+
+    # Criando pasta de destino para a tabela  CONAMA
+    
+    # Cria pasta de saída se não existir para o formato parquet
+    output_dir = Path("/opt/airflow/data") / f"MANUAL"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    arquivo_destino = output_dir / f"TABELA_CONAMA.csv"
+    tabela_conama_ano.to_csv(arquivo_destino)
+
+    return tabela_conama_ano
+
+tabela_conama = df_fase_conama_motor_raw()
+
+# Leitura das tabelas
+
+path_file = Path(f"/opt/airflow/data/MANUAL/")
+
+# Este arquivos podem ser trocados conforme as regras de negócio.
+name_file_consumo_diesel = "consumo_diesel.csv"
+name_file_tabela_patrimonial = "Patrimonial - 31 05 2026 Modificado.xlsx"
+
+df_tabela_consumo_diesel = pd.read_csv(path_file / name_file_consumo_diesel)    # Arquivo de referência para o Cálculo de Emissões
+df_tabela_patrimonial = pd.read_excel(path_file / name_file_tabela_patrimonial) # Arquivo referência do patrimonial
+
+# Pipeline de ETL
+
+# 1° FASE : LIMPEZA PRELIMINAR DOS DADOS
+
+# 1. Mantém todas as linhas, EXCETO onde status é 'inativo' E valor é NaN
+condicao_remover = (df_tabela_patrimonial["Tecnologia"].isin(['eMidiônibus\xa0','eMiniônibus\xa0', 'Midiônibus Rural\xa0', 'Micro Ônibus\xa0', 
+                                                              'nan'])) | (df_tabela_patrimonial["Tecnologia"].isna())
+
+df_limpo = df_tabela_patrimonial[~condicao_remover]
+
+#['eMidiônibus\xa0','eMiniônibus\xa0', 'Midiônibus Rural\xa0', 'Micro Ônibus\xa0', "nan"] - > valores para remoção
+
+# 2. Limpa os caracteres invisíveis (\xa0) e converte de vez para número (int)
+df_limpo['Ano Modelo'] = df_limpo['Ano Modelo'].astype(str).str.strip('\xa0')
+# Add: Forma mais robusta de tirar os valores nulos
+df_limpo['Ano Modelo'] = pd.to_numeric(
+    df_limpo['Ano Modelo'],
+    errors='coerce'
+)
+# 3. Remove any NaN values that might have been introduced by pd.to_numeric before converting to nullable integer type
+df_limpo.dropna(subset=['Ano Modelo'], inplace=True)
+df_limpo['Ano Modelo'] = df_limpo['Ano Modelo'].astype(pd.Int64Dtype())
+
+# 4. Ordena os dados (passo obrigatório que conversamos para o merge_asof funcionar)
+df_limpo.sort_values('Ano Modelo', inplace=True)
+
+# 5. Testa o print novamente para checar se sumiu o nan e agora são números puros
+print(df_limpo['Ano Modelo'].unique().tolist())
+
+# 2° FASE ADD. CRITÉRIO CONAMA
+
+# --- PASSO 1: Add. critério de separação para o merge das tabelas
+tipos_tecnologia = ['Midiônibus\xa0', 'Padron\xa0', 'Básico\xa0', 'Articulado\xa0', 'Miniônibus\xa0', 'eBásico\xa0']
+
+# --- PASSO 2: Separar os DataFrames ---
+df_diesel = df_limpo[df_limpo['Tecnologia'].isin(tipos_tecnologia)].copy()
+df_outros = df_limpo[~df_limpo['Tecnologia'].isin(tipos_tecnologia)].copy()
+
+# --- PASSO 3: Criar os intervalos e aplicar a Fase Conama de uma vez só ---
+# Definimos os limites dos anos (bins) e os nomes das fases (labels)
+# Nota: O limite inicial é 1994, até o infinito (np.inf) para abranger 2022+
+limites_anos = [1994, 1997, 2004, 2008, 2011, 2022, np.inf]
+nomes_fases = ["P3", "P4", "P5", "P6", "P7", "P8"]
+
+# pd.cut faz a mágica de forma instantânea
+df_diesel['fase_conama'] = pd.cut(
+    df_diesel['Ano Modelo'],
+    bins=limites_anos,
+    labels=nomes_fases,
+    right=False # Garante que o intervalo seja fechado na esquerda e aberto na direita (ex: [1994, 1997) )
+)
+
+# Caso algum ônibus tenha ano menor que 1994, preenchemos com "Não se aplica"
+df_diesel['fase_conama'] = df_diesel['fase_conama'].cat.add_categories("Não se aplica").fillna("Não se aplica")
+
+# --- PASSO 4: Para os outros ônibus, colocar "Não se aplica" ---
+df_outros['fase_conama'] = 'Não se aplica'
+
+# --- PASSO 5: Juntar tudo de volta ---
+df_resultado_final = pd.concat([df_diesel, df_outros], ignore_index=True)
+
+# 3° FASE : MAPEAMENTO DE CONSUMO E EMISSÃO 
+
+# 1. Criamos a tabela de referência (dicionário) com os valores de NOx(kg poluentes/kg diesel) e MP(kg poluentes/kg diesel) para cada fase
+mapeamento_poluentes = {
+    'P5': {'NOx(kg poluentes/kg diesel)': 0.020982, 'MP(kg poluentes/kg diesel)': 0.000388},
+    'P7': {'NOx(kg poluentes/kg diesel)': 0.006575, 'MP(kg poluentes/kg diesel)': 0.000055},
+    'P8': {'NOx(kg poluentes/kg diesel)': 0.001112, 'MP(kg poluentes/kg diesel)': 0.000026}
+}
+
+# 2. Criamos as novas colunas fazendo o mapeamento da 'fase_conama'
+# Usamos o .get() para garantir que fases não mapeadas (como P3, P6 ou 'Não se aplica') fiquem como NaN ou 0
+df_resultado_final['NOx(kg poluentes/kg diesel)'] = df_resultado_final['fase_conama'].map(
+    lambda x: mapeamento_poluentes.get(x, {}).get('NOx(kg poluentes/kg diesel)', np.nan)
+)
+
+df_resultado_final['MP(kg poluentes/kg diesel)'] = df_resultado_final['fase_conama'].map(
+    lambda x: mapeamento_poluentes.get(x, {}).get('MP(kg poluentes/kg diesel)', np.nan)
+)
+
+# 3. Se você preferir que as fases sem dados (como elétricos ou fases antigas) fiquem com 0 em vez de NaN:
+# df_resultado_final['NOx(kg poluentes/kg diesel)'] = df_resultado_final['NOx(kg poluentes/kg diesel)'].fillna(0)
+# df_resultado_final['MP(kg poluentes/kg diesel)'] = df_resultado_final['MP(kg poluentes/kg diesel)'].fillna(0)
+
+# Cria pasta de saída se não existir para o formato parquet
+output_dir_csv = Path("/opt/airflow/data//data/MANUAL")
+output_dir_csv.mkdir(parents=True, exist_ok=True)
+arquivo_destino = output_dir_csv / f"tabela_patrimonial_normalizada.csv"
+
+df_resultado_final.to_csv(arquivo_destino)
+

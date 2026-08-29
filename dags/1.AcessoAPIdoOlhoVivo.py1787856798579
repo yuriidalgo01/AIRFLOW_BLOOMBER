@@ -1,0 +1,49 @@
+import pendulum
+import requests
+from airflow.decorators import dag, task
+from airflow.models import Variable
+
+@dag(
+    dag_id="SensorAPIOlhoVivo",
+    description="Sensor da API Olho Vivo SPTrans",
+    schedule=None,
+    start_date=pendulum.datetime(2025, 1, 1, tz="America/Sao_Paulo"),
+    catchup=False,
+    tags=["API", "OLHO_VIVO"],
+)
+def pipeline_olho_vivo():
+
+    @task
+    def extrair_posicoes_sptrans():
+        print("Iniciando a task...")
+        
+        # 1. Recupera o token (insira seu token direto como fallback se não configurou a Variable)
+        token = Variable.get("sptrans_token", default_var="COLE_SEU_TOKEN_AQUI")
+        print(f"Token recuperado: {token[:6]}***")
+
+        base_url = "http://api.olhovivo.sptrans.com.br/v2.1"
+        session = requests.Session()
+
+        # 2. Autenticação
+        print("Autenticando na SPTrans...")
+        auth_url = f"{base_url}/Login/Autenticar?token={token}"
+        auth_response = session.post(auth_url)
+        print(f"Status HTTP Autenticacao: {auth_response.status_code}")
+        print(f"Resposta Autenticacao: {auth_response.text}")
+
+        if auth_response.text.strip().lower() != "true":
+            raise ValueError(f"Falha ao autenticar token na SPTrans: {auth_response.text}")
+
+        # 3. Consulta Posicao
+        print("Buscando posicoes dos veiculos...")
+        posicao_response = session.get(f"{base_url}/Posicao")
+        posicao_response.raise_for_status()
+
+        dados = posicao_response.json()
+        print(f"Dados retornados com sucesso! Horario: {dados.get('hr')}")
+        
+        return dados
+
+    extrair_posicoes_sptrans()
+
+pipeline_olho_vivo()
