@@ -3,3 +3,6 @@ airflow.cfg
 data/
 Scripts_test/
 /*.json
+__pycache__/
+*.pyc
+dags/__pycache__/
