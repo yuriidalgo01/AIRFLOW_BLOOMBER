@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from pathlib import Path
 import glob
 import numpy as np
@@ -20,20 +20,21 @@ def haversine_np(lat1, lon1, lat2, lon2):
     c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
     return R * c
 
+
 # --- Função de processamento executada pela Task ---
 def processar_distancia_dia_anterior(data_alvo: str, **kwargs):
     data_formatada = datetime.strptime(data_alvo, "%Y%m%d").strftime("%Y-%m-%d")
-    print(data_formatada)
-    
+    print(f"Iniciando: {data_formatada}")
+
     base_dir = Path(f"/opt/airflow/data/raw/POSICAO/data={data_formatada}")
     output_dir = Path(f"/opt/airflow/data/processed/data={data_formatada}")
-    
+
     dir_parquet = output_dir / "files_parquet"
     dir_csv = output_dir / "files_csv"
-    
+
     dir_parquet.mkdir(parents=True, exist_ok=True)
     dir_csv.mkdir(parents=True, exist_ok=True)
-    
+
     pattern = str(base_dir / f"posicao_{data_alvo}_*.json")
     arquivos = glob.glob(pattern)
 
@@ -43,14 +44,12 @@ def processar_distancia_dia_anterior(data_alvo: str, **kwargs):
 
     print(f"Processando {len(arquivos)} arquivos da data {data_alvo}...")
 
-    # Leitura arquivo por arquivo (economiza drasticamente a memória)
     records = []
     for f in arquivos:
         try:
             with open(f, "r", encoding="utf-8") as arq:
                 conteudo = json.load(arq)
-                
-                # Trata tanto se o JSON for lista ou dicionário
+
                 itens_l = conteudo.get("l", []) if isinstance(conteudo, dict) else []
                 if isinstance(conteudo, list):
                     for elem in conteudo:
@@ -110,10 +109,36 @@ def processar_distancia_dia_anterior(data_alvo: str, **kwargs):
 
     df_resumo.to_parquet(caminho_saida_1, index=False)
     df_resumo.to_csv(caminho_saida_2, index=False)
-    
+
     print(f"Sucesso! Arquivos gerados:")
     print(f" -> Parquet: {caminho_saida_1.resolve()}")
     print(f" -> CSV:     {caminho_saida_2.resolve()}")
+
+
+# --- Função de varredura para o intervalo de datas ---
+def processar_dias_pendentes(data_inicio_str: str = "2026-08-27"):
+    dt_inicio = datetime.strptime(data_inicio_str, "%Y-%m-%d").date()
+    dt_fim = date.today()
+
+    total_dias = (dt_fim - dt_inicio).days + 1
+    print(f"--- Verificando intervalo de {dt_inicio} até {dt_fim} ({total_dias} dia(s)) ---")
+
+    for i in range(total_dias):
+        dia_atual = dt_inicio + timedelta(days=i)
+        data_formatada = dia_atual.strftime("%Y-%m-%d")
+        data_alvo = dia_atual.strftime("%Y%m%d")
+
+        # Verifica se o arquivo final já existe
+        saida_parquet = Path(
+            f"/opt/airflow/data/processed/data={data_formatada}/files_parquet/distancia_veiculos_{data_alvo}.parquet"
+        )
+
+        if saida_parquet.exists():
+            print(f"[PULANDO] Data {data_alvo} ({data_formatada}) já foi processada.")
+            continue
+
+        print(f"[PROCESSANDO] Data pendente encontrada: {data_alvo} ({data_formatada})")
+        processar_distancia_dia_anterior(data_alvo)
 
 
 # --- Definição da DAG ---
@@ -127,48 +152,19 @@ with DAG(
     dag_id="processamento_diario_posicao_onibus_teste",
     default_args=default_args,
     start_date=datetime(2026, 1, 1),
-    schedule="0 3 * * *",              # 'None' para permitir apenas disparos manuais no teste
+    schedule="0 3 * * *",
     catchup=False,
     tags=["processamento_distancia", "distancia_km", "distancia_m"],
     max_active_runs=1,
 ) as dag:
 
     task_processar = PythonOperator(
-        task_id="calcular_distancia_dia_anterior",
-        python_callable=processar_distancia_dia_anterior,
-        # Você pode passar qualquer dia desejado:
-        op_kwargs={"data_alvo": "20260827"},
+        task_id="processar_pendentes_ou_dia_anterior",
+        python_callable=processar_dias_pendentes,
+        op_kwargs={"data_inicio_str": "2026-08-27"},
     )
-
-# --- Função de varredura para dias pendentes ---
-def processar_dias_pendentes():
-    raw_base = Path("/opt/airflow/data/raw/POSICAO")
-    
-    # Encontra todas as pastas no formato data=YYYY-MM-DD
-    pastas_raw = sorted(raw_base.glob("data=*"))
-
-    for pasta in pastas_raw:
-        data_formatada = pasta.name.split("=")[-1]  # '2026-08-27'
-        try:
-            data_alvo = datetime.strptime(data_formatada, "%Y-%m-%d").strftime("%Y%m%d")
-        except ValueError:
-            continue
-
-        # Verifica se o arquivo final já existe
-        saida_parquet = Path(f"/opt/airflow/data/processed/data={data_formatada}/files_parquet/distancia_veiculos_{data_alvo}.parquet")
-        
-        if saida_parquet.exists():
-            print(f"[PULANDO] Data {data_alvo} já foi processada.")
-            continue
-
-        print(f"[PROCESSANDO] Iniciando data pendente: {data_alvo}")
-        processar_distancia_dia_anterior(data_alvo)
 
 
 # Execução manual fora do Airflow
 if __name__ == "__main__":
-    processar_dias_pendentes()
-    # Para reprocessar um dia anterior caso haja necessidade.
-    #processar_distancia_dia_anterior("20260827") 
-    
-    
+    processar_dias_pendentes("2026-08-27")
