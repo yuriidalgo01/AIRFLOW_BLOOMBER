@@ -25,7 +25,7 @@ def transformar_dados_sptrans(json_data):
             registros.append({
                 "prefixo_veiculo": veiculo.get("p"),     # 'p'
                 "hr_referencia": hora_referencia,
-                #"codigo_linha": codigo_linha,
+                "codigo_linha": codigo_linha,           # add. código da linha 02/09/2026
                 #"letreiro_origem": letreiro_origem,
                 #"letreiro_destino": letreiro_destino,
                 #"sentido": sentido,
