@@ -6,3 +6,7 @@ Scripts_test/
 __pycache__/
 *.pyc
 dags/__pycache__/
+
+*.csv
+*.xlsx
+*.iyc
