@@ -2,11 +2,11 @@ logs/
 airflow.cfg
 data/
 Scripts_test/
-/*.json
 __pycache__/
 *.pyc
-dags/__pycache__/
 
 *.csv
 *.xlsx
-*.iyc
+*.json
+*.py[0-9]*
+*.py.*
