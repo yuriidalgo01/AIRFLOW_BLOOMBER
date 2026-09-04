@@ -23,11 +23,18 @@ FINAL_DIR = BASE_DATA_DIR / "FINAL"
 PROCESSED_DIR = BASE_DATA_DIR / "processed" / "calculo_emissoes"
 
 
-def processar_csv_para_json(csv_path: str, json_output_path: str):
+def processar_csv_para_json_e_csv(csv_path: str, json_output_path: str, csv_output_path: str = None):
     csv_file = Path(csv_path)
     json_file = Path(json_output_path)
+    
+    # Se o caminho CSV final não for passado explicitamente, deduz trocando a extensão do JSON
+    if csv_output_path is None:
+        csv_out_file = json_file.with_suffix(".csv")
+    else:
+        csv_out_file = Path(csv_output_path)
 
     json_file.parent.mkdir(parents=True, exist_ok=True)
+    csv_out_file.parent.mkdir(parents=True, exist_ok=True)
 
     if not csv_file.exists():
         print(f"[AVISO] Arquivo CSV não encontrado: {csv_file}")
@@ -36,36 +43,68 @@ def processar_csv_para_json(csv_path: str, json_output_path: str):
     df = pd.read_csv(csv_file)
 
     colunas_map = {
-        'bus_id': 'codigo_onibus',
-        'line_id' : 'codigo_linha',
-        'distancia_km': 'distancia_percorrida',
-        'Tecnologia': 'modelo',
-        'emissao_co2(t)': 'emissao_co2',
-        'emissao_mp(kg)': 'emissao_mp',
-        'emissao_nox(kg)': 'emissao_nox'
+        'bus_id'                 : 'codigo_onibus',
+        'distancia_km'           : 'distancia_percorrida',
+        'segundos_deslocamento'  : 'segundos_deslocamento',
+        'Tecnologia'             : 'tecnologia',
+        'com_ar_l_km'            : 'fator_consumo_l',
+        'com_ar_kg_km'           : 'fator_consumo_kg',
+        'consumo_l'              : 'consumo_l',
+        'consumo_kg'             : 'consumo_kg',
+        'emissao_co2(t)'         : 'emissao_co2',
+        'emissao_mp(kg)'         : 'emissao_mp',
+        'emissao_nox(kg)'        : 'emissao_nox',
+        'line_id'                : 'random_linhas',
+        'geometry'               : 'geometry',
+        'random_pop_afetada_mp'  : 'random_pop_afetada_mp',
+        'random_pop_afetada_nox' : 'random_pop_afetada_nox'
     }
     
     df = df.rename(columns=colunas_map)
 
     colunas_finais = [
-        'codigo_onibus', 
-        'modelo',
-        'codigo_linha',
-        'distancia_percorrida', 
-        'emissao_co2', 
-        'emissao_mp', 
-        'emissao_nox'
+        'codigo_onibus',
+        'distancia_percorrida',
+        'segundos_deslocamento',
+        'tecnologia',
+        'fator_consumo_l',
+        'fator_consumo_kg',
+        'consumo_l',
+        'consumo_kg',
+        'emissao_co2',
+        'emissao_mp',
+        'emissao_nox',
+        'random_linhas',
+        'geometry',
+        'random_pop_afetada_mp',
+        'random_pop_afetada_nox'
     ]
-    df_saida = df[[col for col in colunas_finais if col in df.columns]]
 
+    # Preenche colunas ausentes com 0
+    colunas_faltantes = [col for col in colunas_finais if col not in df.columns]
+    if colunas_faltantes:
+        df[colunas_faltantes] = 0
+
+    # Garante ordenação padronizada das colunas
+    df_saida = df[colunas_finais]
+
+    # 1. Salva em formato JSON
     df_saida.to_json(
         json_file, 
         orient='records', 
         force_ascii=False,
         indent=2
     )
-    
     print(f"[SUCESSO] Arquivo JSON gerado em: {json_file}")
+
+    # 2. Salva em formato CSV
+    df_saida.to_csv(
+        csv_out_file,
+        index=False,
+        encoding='utf-8'
+    )
+    print(f"[SUCESSO] Arquivo CSV gerado em: {csv_out_file}")
+
     return True
 
 
@@ -86,31 +125,33 @@ def processar_dias_pendentes(data_inicio_str: str = "2026-08-27"):
 
         csv_path = PROCESSED_DIR / f"tabela_emissoes_{ds_nodash}.csv"
         json_output_path = FINAL_DIR / f"tabela_emissoes_{ds_nodash}.json"
+        csv_output_path = FINAL_DIR / f"tabela_emissoes_{ds_nodash}.csv"
 
-        if json_output_path.exists():
-            print(f"[PULANDO] Data {ds_nodash} já possui JSON processado.")
+        if json_output_path.exists() and csv_output_path.exists():
+            print(f"[PULANDO] Data {ds_nodash} já possui JSON e CSV processados.")
             continue
 
-        print(f"[PROCESSANDO] Gerando JSON para a data: {ds_nodash}")
-        processar_csv_para_json(str(csv_path), str(json_output_path))
+        print(f"[PROCESSANDO] Gerando JSON e CSV para a data: {ds_nodash}")
+        processar_csv_para_json_e_csv(str(csv_path), str(json_output_path), str(csv_output_path))
 
 
 with DAG(
-    dag_id='dag_converte_emissoes_csv_para_json',
+    dag_id='dag_converte_emissoes_csv_para_json_e_csv',
     default_args=default_args,
-    description='Converte tabela de emissões diária CSV para arquivo JSON',
+    description='Converte tabela de emissões diária CSV para arquivos JSON e CSV finais',
     start_date=pendulum.datetime(2026, 8, 27, tz="America/Sao_Paulo"),
     schedule='0 7 * * *',
     catchup=True,
-    tags=['emissoes', 'etl', 'json', 'final']
+    tags=['emissoes', 'etl', 'json', 'csv', 'final']
 ) as dag:
 
-    tarefa_converter_json = PythonOperator(
-        task_id='task_csv_para_json',
-        python_callable=processar_csv_para_json,
+    tarefa_converter_arquivos = PythonOperator(
+        task_id='task_csv_para_json_e_csv',
+        python_callable=processar_csv_para_json_e_csv,
         op_kwargs={
             'csv_path': str(PROCESSED_DIR / "tabela_emissoes_{{ data_interval_start.strftime('%Y%m%d') }}.csv"),
-            'json_output_path': str(FINAL_DIR / "tabela_emissoes_{{ data_interval_start.strftime('%Y%m%d') }}.json")
+            'json_output_path': str(FINAL_DIR / "tabela_emissoes_{{ data_interval_start.strftime('%Y%m%d') }}.json"),
+            'csv_output_path': str(FINAL_DIR / "tabela_emissoes_{{ data_interval_start.strftime('%Y%m%d') }}.csv")
         }
     )
 
