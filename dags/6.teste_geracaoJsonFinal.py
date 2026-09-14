@@ -23,15 +23,16 @@ FINAL_DIR = BASE_DATA_DIR / "FINAL"
 PROCESSED_DIR = BASE_DATA_DIR / "processed" / "calculo_emissoes"
 
 
-def processar_csv_para_json_e_csv(csv_path: str, json_output_path: str, csv_output_path: str = None):
-    csv_file = Path(csv_path)
-    json_file = Path(json_output_path)
+def processar_csv_para_json_e_csv(**context):
+    # Obtém o início do intervalo convertido para o fuso de São Paulo
+    data_interval_start = context['data_interval_start'].in_timezone('America/Sao_Paulo')
     
-    # Se o caminho CSV final não for passado explicitamente, deduz trocando a extensão do JSON
-    if csv_output_path is None:
-        csv_out_file = json_file.with_suffix(".csv")
-    else:
-        csv_out_file = Path(csv_output_path)
+    # Subtrai 1 dia explicitamente
+    data_alvo = (data_interval_start - timedelta(days=1)).strftime('%Y%m%d')
+
+    csv_file = PROCESSED_DIR / f"tabela_emissoes_{data_alvo}.csv"
+    json_file = FINAL_DIR / f"tabela_emissoes_{data_alvo}.json"
+    csv_out_file = FINAL_DIR / f"tabela_emissoes_{data_alvo}.csv"
 
     json_file.parent.mkdir(parents=True, exist_ok=True)
     csv_out_file.parent.mkdir(parents=True, exist_ok=True)
