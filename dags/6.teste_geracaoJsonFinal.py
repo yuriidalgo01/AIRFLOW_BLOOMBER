@@ -4,7 +4,6 @@ import pandas as pd
 import pendulum
 
 from airflow import DAG
-# Import atualizado conforme aviso no log
 try:
     from airflow.providers.standard.operators.python import PythonOperator
 except ImportError:
@@ -23,16 +22,11 @@ FINAL_DIR = BASE_DATA_DIR / "FINAL"
 PROCESSED_DIR = BASE_DATA_DIR / "processed" / "calculo_emissoes"
 
 
-def processar_csv_para_json_e_csv(**context):
-    # Obtém o início do intervalo convertido para o fuso de São Paulo
-    data_interval_start = context['data_interval_start'].in_timezone('America/Sao_Paulo')
-    
-    # Subtrai 1 dia explicitamente
-    data_alvo = (data_interval_start - timedelta(days=1)).strftime('%Y%m%d')
-
-    csv_file = PROCESSED_DIR / f"tabela_emissoes_{data_alvo}.csv"
-    json_file = FINAL_DIR / f"tabela_emissoes_{data_alvo}.json"
-    csv_out_file = FINAL_DIR / f"tabela_emissoes_{data_alvo}.csv"
+def converter_csv_para_json_e_csv(csv_file: Path, json_file: Path, csv_out_file: Path) -> bool:
+    """Executa a transformação e salva os arquivos finais."""
+    csv_file = Path(csv_file)
+    json_file = Path(json_file)
+    csv_out_file = Path(csv_out_file)
 
     json_file.parent.mkdir(parents=True, exist_ok=True)
     csv_out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -64,49 +58,38 @@ def processar_csv_para_json_e_csv(**context):
     df = df.rename(columns=colunas_map)
 
     colunas_finais = [
-        'codigo_onibus',
-        'distancia_percorrida',
-        'segundos_deslocamento',
-        'tecnologia',
-        'fator_consumo_l',
-        'fator_consumo_kg',
-        'consumo_l',
-        'consumo_kg',
-        'emissao_co2',
-        'emissao_mp',
-        'emissao_nox',
-        'random_linhas',
-        'geometry',
-        'random_pop_afetada_mp',
+        'codigo_onibus', 'distancia_percorrida', 'segundos_deslocamento',
+        'tecnologia', 'fator_consumo_l', 'fator_consumo_kg', 'consumo_l',
+        'consumo_kg', 'emissao_co2', 'emissao_mp', 'emissao_nox',
+        'random_linhas', 'geometry', 'random_pop_afetada_mp',
         'random_pop_afetada_nox'
     ]
 
-    # Preenche colunas ausentes com 0
     colunas_faltantes = [col for col in colunas_finais if col not in df.columns]
     if colunas_faltantes:
         df[colunas_faltantes] = 0
 
-    # Garante ordenação padronizada das colunas
     df_saida = df[colunas_finais]
 
-    # 1. Salva em formato JSON
-    df_saida.to_json(
-        json_file, 
-        orient='records', 
-        force_ascii=False,
-        indent=2
-    )
+    df_saida.to_json(json_file, orient='records', force_ascii=False, indent=2)
     print(f"[SUCESSO] Arquivo JSON gerado em: {json_file}")
 
-    # 2. Salva em formato CSV
-    df_saida.to_csv(
-        csv_out_file,
-        index=False,
-        encoding='utf-8'
-    )
+    df_saida.to_csv(csv_out_file, index=False, encoding='utf-8')
     print(f"[SUCESSO] Arquivo CSV gerado em: {csv_out_file}")
 
     return True
+
+
+def task_airflow_processar(**context):
+    """Entrypoint chamado pelo Airflow via context."""
+    data_interval_start = context['data_interval_start'].in_timezone('America/Sao_Paulo')
+    data_alvo = (data_interval_start - timedelta(days=1)).strftime('%Y%m%d')
+
+    csv_file = PROCESSED_DIR / f"tabela_emissoes_{data_alvo}.csv"
+    json_file = FINAL_DIR / f"tabela_emissoes_{data_alvo}.json"
+    csv_out_file = FINAL_DIR / f"tabela_emissoes_{data_alvo}.csv"
+
+    return converter_csv_para_json_e_csv(csv_file, json_file, csv_out_file)
 
 
 def processar_dias_pendentes(data_inicio_str: str = "2026-08-27"):
@@ -133,7 +116,7 @@ def processar_dias_pendentes(data_inicio_str: str = "2026-08-27"):
             continue
 
         print(f"[PROCESSANDO] Gerando JSON e CSV para a data: {ds_nodash}")
-        processar_csv_para_json_e_csv(str(csv_path), str(json_output_path), str(csv_output_path))
+        converter_csv_para_json_e_csv(csv_path, json_output_path, csv_output_path)
 
 
 with DAG(
@@ -148,12 +131,7 @@ with DAG(
 
     tarefa_converter_arquivos = PythonOperator(
         task_id='task_csv_para_json_e_csv',
-        python_callable=processar_csv_para_json_e_csv,
-        op_kwargs={
-            'csv_path': str(PROCESSED_DIR / "tabela_emissoes_{{ data_interval_start.strftime('%Y%m%d') }}.csv"),
-            'json_output_path': str(FINAL_DIR / "tabela_emissoes_{{ data_interval_start.strftime('%Y%m%d') }}.json"),
-            'csv_output_path': str(FINAL_DIR / "tabela_emissoes_{{ data_interval_start.strftime('%Y%m%d') }}.csv")
-        }
+        python_callable=task_airflow_processar
     )
 
 
